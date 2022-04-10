@@ -1,0 +1,21 @@
+provider "google" {
+
+  project = "neon-feat-345811"
+  region  = "asia-south2 (Delhi)"
+  zone    = "asia-south2-a"
+}
+
+resource "google_compute_instance" "my_web_server" {
+      name         = "my-gcp-server"
+      machine_type = "f1-micro"
+    
+      boot_disk {
+        initialize_params {
+          image = "centos-cloud/centos-7"
+        }
+      }    
+      network_interface {       
+        network = "default"
+        access_config {}
+      }
+    }
