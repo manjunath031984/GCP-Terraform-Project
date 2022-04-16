@@ -1,0 +1,112 @@
+provider "google" {
+project = "neon-feat-345811"
+region  = "asia-south2"
+}
+#Main vpc
+#https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_network
+resource "google_compute_network" "main" {
+name                    = "main-prod"
+auto_create_subnetworks = false
+}
+#creating the compute_instance in the public subnet
+resource "google_compute_instance" "vm_instance" {
+name         = "debian-vm-public"
+machine_type = "f1-micro"
+zone         = "asia-south2-a"
+tags         = ["http-server"]
+boot_disk {
+initialize_params {
+image = "debian-cloud/debian-9"
+ }
+}
+#start-up script
+metadata_startup_script = <<SCRIPT
+#!/bin/bash
+sudo apt update -y 
+sudo apt -y install apache2
+cat <<EOF > /var/www/html/index.html 
+<html><body><p>Linux startup script added directly.</p>
+</body></html> 
+SCRIPT
+
+network_interface {
+subnetwork = google_compute_subnetwork.public.id
+access_config {}
+ }
+}
+#Public Subnet
+resource "google_compute_subnetwork" "public" {
+name          = "public"
+ip_cidr_range = "10.0.0.0/24"
+region        = "asia-south2"
+network       = google_compute_network.main.id
+}
+
+#Public Route
+resource "google_compute_route" "route-public" {
+name             = "route-public"
+dest_range       = "0.0.0.0/0"
+network          = google_compute_network.main.name
+next_hop_gateway = "global/gateways/default-internet-gateway"
+priority         = "0"
+}
+
+#private Subnet
+resource "google_compute_subnetwork" "private" {
+name          = "private"
+ip_cidr_range = "10.0.1.0/24"
+region        = "asia-south2"
+network       = google_compute_network.main.id
+}
+#private route
+resource "google_compute_router" "router" {
+name    = "router"
+network = google_compute_network.main.id
+bgp {
+asn = 64514
+ }
+}
+#Nat gateway
+resource "google_compute_router_nat" "nat" {
+  name                               = "nat"
+  router                             = google_compute_router.router.name
+  region                             = google_compute_router.router.region
+  nat_ip_allocate_option             = "AUTO_ONLY"
+  source_subnetwork_ip_ranges_to_nat = "LIST_OF_SUBNETWORKS"
+
+  subnetwork {
+    name                    = "private"
+    source_ip_ranges_to_nat = ["ALL_IP_RANGES"]
+  }
+}
+#creating the compute_instance in the private subnet
+resource "google_compute_instance" "vm_instance_private" {
+name         = "debian-vm-private"
+machine_type = "f1-micro"
+zone         = "asia-south2-a"
+
+boot_disk {
+initialize_params {
+image = "debian-cloud/debian-9"
+ }
+}
+network_interface {
+subnetwork = google_compute_subnetwork.private.id
+access_config {}
+ }
+}
+#creating the firewall-rules
+resource "google_compute_firewall" "rules" {
+project     = "neon-feat-345811"
+name        = "my-firewall-rule"
+network     = google_compute_network.main.name
+depends_on  = [google_compute_network.main]
+description = "Creates firewall rule targeting tagged instances"
+allow {
+protocol = "tcp"
+ports    = ["22", "80"]
+}
+
+// Allow traffic from everywhere to instances with an http-server tag
+source_ranges = ["0.0.0.0/0"]
+}
